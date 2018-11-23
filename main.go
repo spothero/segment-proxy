@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -10,7 +9,12 @@ import (
 	"strings"
 
 	"github.com/gorilla/handlers"
+	l "github.com/spothero/segment-proxy/pkg/logging"
+	"go.uber.org/zap"
 )
+
+var logger *zap.SugaredLogger
+var version = "not-set"
 
 // singleJoiningSlash is copied from httputil.singleJoiningSlash method.
 func singleJoiningSlash(a, b string) string {
@@ -52,28 +56,58 @@ func NewSegmentReverseProxy(cdn *url.URL, trackingAPI *url.URL) http.Handler {
 		// Set the host of the request to the host of of the destination URL.
 		// See http://blog.semanticart.com/blog/2013/11/11/a-proper-api-proxy-written-in-go/.
 		req.Host = req.URL.Host
+		logger.Infow("Processing request", "url", req.URL.String())
 	}
 	return &httputil.ReverseProxy{Director: director}
 }
 
+func healthResponse(w http.ResponseWriter, r *http.Request) {
+	w.Write([]byte(version))
+}
+
 var port = flag.String("port", "8080", "bind address")
+var healthport = flag.String("healthport", "8081", "bind address")
 var debug = flag.Bool("debug", false, "debug mode")
 
 func main() {
 	flag.Parse()
+
+	var config = l.LoggingConfig{
+		Level:      "DEBUG",
+		AppVersion: version,
+	}
+
+	config.InitializeLogger()
+	logger = l.Logger.Sugar()
 	cdnURL, err := url.Parse("https://cdn.segment.com")
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err)
 	}
 	trackingAPIURL, err := url.Parse("https://api.segment.io")
 	if err != nil {
-		log.Fatal(err)
+		logger.Error(err)
 	}
 	proxy := NewSegmentReverseProxy(cdnURL, trackingAPIURL)
 	if *debug {
 		proxy = handlers.LoggingHandler(os.Stdout, proxy)
-		log.Printf("serving proxy at port %v\n", *port)
 	}
 
-	log.Fatal(http.ListenAndServe(":"+*port, proxy))
+	shutdown := make(chan bool)
+
+	go func() {
+		healthServer := http.NewServeMux()
+		healthServer.HandleFunc("/health", healthResponse)
+		logger.Infof("Serving healthcheck at port %v", *healthport)
+		logger.Error(http.ListenAndServe(":"+*healthport, healthServer))
+		shutdown <- true
+	}()
+
+	go func() {
+		logger.Infof("Serving proxy at port %v", *port)
+		logger.Error(http.ListenAndServe(":"+*port, proxy))
+		shutdown <- true
+	}()
+
+	// Blocks and waits until it receives a bool
+	<-shutdown
 }

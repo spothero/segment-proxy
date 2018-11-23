@@ -43,7 +43,7 @@ func TestSegmentReverseProxy(t *testing.T) {
 			}
 		}))
 
-		proxy := httptest.NewServer(NewSegmentReverseProxy(mustParseUrl(cdn.URL), mustParseUrl(trackingAPI.URL)))
+		proxy := httptest.NewServer(NewSegmentReverseProxy(mustParseURL(cdn.URL), mustParseURL(trackingAPI.URL)))
 
 		_, err := http.Get(proxy.URL + c.url)
 		if err != nil {
@@ -55,7 +55,7 @@ func TestSegmentReverseProxy(t *testing.T) {
 	}
 }
 
-func mustParseUrl(raw string) *url.URL {
+func mustParseURL(raw string) *url.URL {
 	u, err := url.Parse(raw)
 	if err != nil {
 		log.Fatal(err)
